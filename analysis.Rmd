@@ -1,7 +1,7 @@
 ---
-title: "Title of Analysis Goes Here"
-author: "Your Name (netid@illinois.edu)"
-date: "Insert Date Here"
+title: "Filling out missing pitch type data"
+author: "Tiffany Lu (tlu17@illinois.edu)"
+date: "2020.11.27"
 output:
   html_document: 
     theme: default
@@ -14,6 +14,9 @@ knitr::opts_chunk$set(echo = FALSE, fig.align = 'center')
 
 ```{r, load-packages, include = FALSE}
 # load packages
+library("caret")
+library("skimr")
+library("rpart")
 ```
 
 ```{r read-data, warning = FALSE, message = FALSE}
@@ -23,46 +26,133 @@ pitches_2020_missing = readr::read_csv("data/pitches_2020_missing.csv")
 pitches_2020_post = readr::read_csv("data/pitches_2020_post.csv")
 ```
 
+```{r, include = FALSE}
+#convert to dataframe
+pitches_2020_regular = data.frame(pitches_2020_regular)
+pitches_2020_missing = data.frame(pitches_2020_missing)
+```
 ***
 
 ## Abstract
-
-> Abstract text goes here.
+Missing data has always been a issue in data quality. Good quality data allows us to make better and more detailed analysis. In our analysis, we want to fill out or predict the missing pitch_type within our data. To do so, we tuned K-nearest neighbor (KNN) models and decision tree models to find the best model with the highest accuracy. Then we use the best model to fill out the missing pitch type data. We found that decision tree models work better than KNN models in predicting pitch type for this dataset. 
 
 ***
 
 ## Introduction
 
-Write your introduction here.
+Missing data has always been a quality issue for large datasets. With missing data, analysis are hard to draw and may end up being inaccurate. In this analysis, we want to create a model so that we can automatically fill out the missing value, which is the pitch_type variable in our dataset. By filling up the missing values, we can further do more analysis on the data and get more accurate and detailed result. Therefore, we want have results that are similar to what is really missing. For the sake of performing machine learning, we are assuming that the dataset is missing completely at random. In this analysis, we will try tuning K-nearest neighbor models and decision tree models to get the most accurate model to predict pitch type. 
 
 ***
 
 ## Methods
 
-Describe the methods used in this section.
-
 ### Data
+The MLB pitches data is scrapped using the baseballr package written by Bill Petti. It contains the pitch type, which is our response variable, of the ball in a MLB game in 2020. The other 24 variables' meanings can be found in the Appendix. The regular dataset contains the observations with already identified pitch type, while the missing dataset contains the observations with unidentified pitch type. Thus, we will be using the missing dataset as our testing dataset and the regular as our training. 
 
-Specifically describe the data and how it is used here.
+We first convert our response variable, pitch type, as a factor since we are doing classification. The variables "stand", and "p_throws" are also factors, since they are represented by "Left" (L) or "Right" (R). 
+```{r, include = FALSE}
+pitches_2020_regular$pitch_type = as.factor(pitches_2020_regular$pitch_type)
+pitches_2020_regular$stand = as.factor(pitches_2020_regular$stand)
+pitches_2020_regular$p_throws = as.factor(pitches_2020_regular$p_throws)
+```
+
+The regular dataset has 518 observations that has feature attributes containing null values. We omitted these rows since our training data cannot contain NA's. 
+```{r, include = FALSE}
+sum(!complete.cases(pitches_2020_regular))
+```
+```{r, include = FALSE}
+new_pitches_regular = na.omit(pitches_2020_regular)
+```
+
+When we look at the attributes, we see that there's a game_date column which indicates the date of the game. Since the date of the game is not relevant to the pitch type, we would not include this variable when training our model. We are also eliminating player name from the dataset, as we want to be able to predict base on the details and maths of the ball, not the person. 
+```{r, include = FALSE}
+new_pitches_regular = new_pitches_regular[-c(2, 7)]
+```
+
+Since the dataset is too large to run on my laptop, we will only use a subset of 10000 observations to do our analysis. 
+```{r, include = FALSE}
+set.seed(0)
+#convert to dataframe
+indexes = sample(nrow(new_pitches_regular), size = 10000)
+new_pitches_regular = new_pitches_regular[indexes,]
+```
+We then split our training data into 80% evaluation and 20% validation dataset.
+```{r, include = FALSE}
+set.seed(0)
+trn_idx = sample(nrow(new_pitches_regular), size = 0.8 * nrow(new_pitches_regular))
+pitch_eval = data.frame(new_pitches_regular[trn_idx, ])
+pitch_val = data.frame(new_pitches_regular[-trn_idx, ])
+```
 
 ### Modeling
+We want to build a simple model that can fill in the missing data values for us as accurately as possible. We choose k-nearest neighbor (knn) because it is fast and easy to run, especially on large datasets. KNN also doesn't assume a form for the data, and is pretty flexible compared to regressions. 
 
-Discuss your modeling and validation strategy here.
+To get the best k, we tried the model with values of k ranging from 1 to 100 and get the model with the best accuracy. By accuracy, we mean the proportion of classifications that we classify right. We want to have a high accuracy because our goal is to fill in the missing pitch data, and a reliable and high-quality data need to be accurate. However, our best model here is the one with k value of 1, with 35.1% accuracy. This 35.1% accuracy is not high at all. This means that we need to either transform the data in some way or to change our model. 
 
+```{r, include = FALSE}
+k_val = seq(1, 101)
+fit_knn_to_est = function(k) {
+  knn3(pitch_type~., data=pitch_eval, k = k)
+}
+knnmodels = lapply(k_val, fit_knn_to_est)
+predictions = lapply(knnmodels, predict, pitch_val, type = "class")
+```
+
+```{r, include = FALSE}
+getAccuracy = function(prediction){
+  mean(prediction==pitch_val$pitch_type)
+}
+accuracies = lapply(predictions, getAccuracy)
+```
+
+```{r, include = FALSE}
+accuracies[which.max(accuracies)]
+```
+
+Since KNN is not working well, we decided to try decision trees. We build decision tree models with cp range: 1e-10, 1e-9, 1e-8..., 1. The model with the highest accuracy is when cp=1e-4, and the accuracy is 80.8%. 
+```{r, include = FALSE}
+cp_val = 10 ^ -(0:10)
+fit_tree_to_est = function(cp) {
+  rpart(pitch_type~., data=pitch_eval, cp = cp)
+}
+treemodels = lapply(cp_val, fit_tree_to_est)
+treepredictions = lapply(treemodels, predict, pitch_val, type = "class")
+```
+
+```{r, include = FALSE}
+treeaccuracies = lapply(treepredictions, getAccuracy)
+```
+
+```{r, include = FALSE}
+treeaccuracies[which.max(treeaccuracies)]
+```
 ***
 
 ## Results
+As decision trees work better, we will use the best model that we obtained on the test data, or the missing dataset. We fit the missing data into a decision model of cp = 1e-4. 
 
-State your results here.
+```{r, include = FALSE}
+treebestmodel = rpart(pitch_type~., data=new_pitches_regular, cp = 1e-4)
+bestprediction = predict(treebestmodel, pitches_2020_missing, type="class")
+```
 
+Now we have a dataset without any missing values for the pitch_type.
+```{r}
+pitches_2020_missing$pitch_type = bestprediction
+head(pitches_2020_missing)
+```
 ***
 
 ## Discussion
 
-Discuss your results here.
+Decision trees work better than KNN classification for the pitch dataset in predicting the pitch type. Decision tree give us a best accuracy of 80.8%, while KNN only gives us a best accuracy of 35.1% accuracy. One major point that might cause this big difference in accuracy is that the dataset contains both numeric and categorical variables. "Stand", and "p_throws" are categorical variables, and the rest of the variables are numeric. KNN do not work well with categorical variables as it tries to calculate the 'distance' between observations. Categorical variables do not have a good 'distance' measurement as it is automatically encoded as a binary value (1 or 0) in our case. Decision trees, however, can predict class based on either categorical or numeric variables as it tries to figure out a splitting criteria for every node. 
+
+After obtaining the model that give us the most accurate results, we are able to predict and fill in our data with missing values. Even though we are unable to verify our results, our final model obtained a validation accuracy of 80.8%, which is okay for just trying to fill out the unknown data sets. For future work, we can try feature reduction techniques such as PCA to further improve our accuracy. 
+
 
 ***
 
 ## Appendix
+Pitch Dataset description can be found here: 
+https://baseballsavant.mlb.com/csv-docs
 
-Place potential additional information here.
