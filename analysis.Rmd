@@ -1,6 +1,6 @@
 ---
 title: "Filling out missing pitch type data"
-author: "Tiffany Lu (tlu17@illinois.edu)"
+author: ""
 date: "2020.11.27"
 output:
   html_document: 
